@@ -112,7 +112,9 @@ describe('Workshop release output', () => {
     expect(modelsBuildRoutes(false)).toEqual([
       {
         pattern: '/models',
-        entrypoint: expect.stringContaining('/routes/models/showcase.astro')
+        entrypoint: expect.stringContaining(
+          join('routes', 'models', 'showcase.astro')
+        )
       }
     ])
     const enabled = modelsBuildRoutes(true)
@@ -128,7 +130,9 @@ describe('Workshop release output', () => {
       '/models/[...slug]/page.json',
       '/models/catalogue.json'
     ])
-    expect(enabled[0].entrypoint).toContain('/routes/models/index.astro')
+    expect(enabled[0].entrypoint).toContain(
+      join('routes', 'models', 'index.astro')
+    )
     for (const route of enabled) expect(existsSync(route.entrypoint)).toBe(true)
   })
 

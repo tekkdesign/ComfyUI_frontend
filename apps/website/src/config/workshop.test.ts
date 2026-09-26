@@ -56,9 +56,10 @@ describe('Workshop catalog', () => {
     // 268 from the partner export plus the ten entries authored on
     // 2026-09-16 (GPT Image 2.5 Flare/Sunburst, Seedance 2.0 ×3,
     // Seedance 2.5 edit video, Wan 3.0 / Prime text-to-video, Grok Imagine
-    // Image 2.0 generate + edit) minus the two withdrawn Kling Camera Control tasks.
-    expect(collection).toHaveLength(276)
-    expect(new Set(collection.map((model) => model.id)).size).toBe(276)
+    // Image 2.0 generate + edit) minus the two withdrawn Kling Camera Control tasks,
+    // plus the authored LTX 2.5 Fast entry.
+    expect(collection).toHaveLength(277)
+    expect(new Set(collection.map((model) => model.id)).size).toBe(277)
   })
 
   it.for(['wan/text-to-video-3.0', 'wan/text-to-video-3.0-prime'])(
