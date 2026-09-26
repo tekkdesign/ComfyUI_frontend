@@ -26,6 +26,8 @@ import type { FacetMenuOption } from './WorkshopFilterMenu.vue'
 import WorkshopFilterMenu from './WorkshopFilterMenu.vue'
 import WorkshopModelCard from './WorkshopModelCard.vue'
 import FeaturedBanner from './FeaturedBanner.vue'
+import { modelSlides, studioSlide } from '../../lib/workshop/featured-slides'
+import { useWorkshopWorkflowsEnabled } from '../../scripts/posthog'
 import WorkshopSearchField from './WorkshopSearchField.vue'
 import WorkshopSections from './WorkshopSections.vue'
 import WorkshopSortMenu from './WorkshopSortMenu.vue'
@@ -145,6 +147,11 @@ const featured = computed(() => {
     'popular'
   )
 })
+const studioEnabled = useWorkshopWorkflowsEnabled()
+const featuredSlides = computed(() => [
+  ...(studioEnabled.value ? [studioSlide(locale)] : []),
+  ...modelSlides(featured.value, locale)
+])
 
 function openSection(value: UseCase | 'other') {
   useCase.value = value
@@ -221,9 +228,12 @@ watch(browseAll, (on) => on && resetFilters())
       <div
         ref="toolbar"
         data-testid="workshop-toolbar"
-        class="sticky top-20 z-30 -mx-1 mb-8 flex scroll-mt-20 flex-wrap items-center justify-end gap-3 bg-page px-1 py-4 max-sm:mb-4 max-sm:py-2 sm:flex-nowrap lg:top-26 lg:scroll-mt-26"
+        class="sticky top-20 z-30 -mx-1 mb-8 flex scroll-mt-20 flex-wrap items-center gap-3 bg-page px-1 py-4 max-sm:mb-4 max-sm:py-2 lg:top-26 lg:scroll-mt-26"
       >
-        <div class="flex min-w-0 flex-1 items-center gap-3 max-sm:basis-full">
+        <slot name="tabs" />
+        <div
+          class="flex min-w-0 flex-1 items-center gap-3 max-sm:basis-full sm:min-w-fit"
+        >
           <WorkshopSearchField
             v-model="query"
             :models
@@ -248,8 +258,7 @@ watch(browseAll, (on) => on && resetFilters())
 
       <FeaturedBanner
         v-if="browsing && featured.length"
-        :models="featured"
-        studio
+        :slides="featuredSlides"
         :locale
         class="mb-10 short:mb-6"
       />

@@ -23,7 +23,7 @@ const {
 }>()
 
 const emit = defineEmits<{
-  again: []
+  retry: []
   switchModel: [slug: string]
   editScene: []
 }>()
@@ -86,7 +86,7 @@ function frameTone(take: Take): string | undefined {
       :take="current"
       :other-model="otherModel"
       :locale
-      @again="emit('again')"
+      @retry="emit('retry')"
       @switch-model="emit('switchModel', $event)"
       @edit-scene="emit('editScene')"
     />

@@ -305,6 +305,8 @@ const copy = {
     en: 'Use as reference',
     'zh-CN': '用作参考'
   },
+  'cinematic.ux.app': { en: 'App', 'zh-CN': '应用' },
+  'cinematic.backToApps': { en: 'Back to apps', 'zh-CN': '返回应用' },
   'cinematic.ux.heading': {
     en: 'Layout to review',
     'zh-CN': '评审布局'
@@ -781,6 +783,10 @@ const copy = {
   'cinematic.output.cancel': {
     en: 'Cancel',
     'zh-CN': '取消'
+  },
+  'cinematic.references.unsupported': {
+    en: "{model} can't use references. Remove them or pick another model.",
+    'zh-CN': '{model} 无法使用参考图。请移除参考图或选择其他模型。'
   },
   'cinematic.output.unavailable': {
     en: 'Running models is not available here yet.',
