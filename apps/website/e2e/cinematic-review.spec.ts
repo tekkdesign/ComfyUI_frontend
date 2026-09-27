@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test'
 
-import { test } from './fixtures/modelsAccount'
+import { test } from './fixtures/studioAccount'
 
 for (const layout of ['e', 'd']) {
   test(`keeps palette and lighting presets independent in layout ${layout}`, async ({

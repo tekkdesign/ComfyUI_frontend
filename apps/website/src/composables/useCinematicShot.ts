@@ -1,4 +1,7 @@
-import type { CreationSettings,SavedCreation } from '../lib/workshop/cinematic-studio/creations'
+import type {
+  CreationSettings,
+  SavedCreation
+} from '../lib/workshop/cinematic-studio/creations'
 import {
   validShotSeed,
   allowedShotAspect,
@@ -752,7 +755,6 @@ export function useCinematicShot(
         ]
     ).filter((file): file is File => !!file)
   )
-
   function videoReferenceSnapshot(): ReferenceFile[] {
     return [
       ...(firstFrame.value &&

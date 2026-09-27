@@ -82,8 +82,22 @@ const focalLabel = computed(() => {
   return focal.id === 'auto' ? undefined : tc(focal.label, locale)
 })
 const referencePreview = useObjectUrl(() => references[0])
+const blockedNote = computed(() =>
+  model.value?.mode !== 'video' &&
+  references.length > 0 &&
+  !model.value?.referenceModelSlug
+    ? tc('cinematic.references.unsupported', locale).replace(
+        '{model}',
+        model.value?.name ?? ''
+      )
+    : undefined
+)
 const canGenerate = computed(
-  () => canReview && gate === 'ready' && scene.value.trim().length > 0
+  () =>
+    canReview &&
+    gate === 'ready' &&
+    scene.value.trim().length > 0 &&
+    !blockedNote.value
 )
 
 function generateFromKeyboard() {
@@ -228,6 +242,7 @@ const chipClass = (key: PopoverKey) =>
         :workspace-name="workspaceName"
         :rendering
         :can-generate="canGenerate"
+        :blocked-note="blockedNote"
         :locale
         class="ml-auto"
         @generate="emit('generate')"

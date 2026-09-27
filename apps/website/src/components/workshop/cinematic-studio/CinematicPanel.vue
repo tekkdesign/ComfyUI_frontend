@@ -85,8 +85,22 @@ const cameraSpecs = computed(() =>
     .map((group) => directionOption(group.part, direction.value))
     .filter((option) => option.id !== 'auto')
 )
+const blockedNote = computed(() =>
+  mode === 'image' &&
+  (cast.value || palette.value) &&
+  !model.value?.referenceModelSlug
+    ? tc('cinematic.references.unsupported', locale).replace(
+        '{model}',
+        model.value?.name ?? ''
+      )
+    : undefined
+)
 const canGenerate = computed(
-  () => canReview && gate === 'ready' && scene.value.trim().length > 0
+  () =>
+    canReview &&
+    gate === 'ready' &&
+    scene.value.trim().length > 0 &&
+    !blockedNote.value
 )
 const labelClass =
   'text-xs font-bold tracking-wider text-primary-comfy-canvas uppercase'
@@ -244,6 +258,7 @@ const cardClass =
         :workspace-name="workspaceName"
         :rendering
         :can-generate="canGenerate"
+        :blocked-note="blockedNote"
         wide
         :locale
         @generate="emit('generate')"

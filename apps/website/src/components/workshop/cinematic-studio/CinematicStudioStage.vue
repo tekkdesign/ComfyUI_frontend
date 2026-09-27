@@ -60,6 +60,7 @@ const emit = defineEmits<{
     @select="studio.select"
     @start="emit('start', $event)"
     @again="emit('again')"
+    @retry="studio.retry"
     @reference="useAsReference"
     @animate="animate"
     @edit="edit"

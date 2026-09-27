@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { test } from './fixtures/modelsAccount'
+import { test } from './fixtures/studioAccount'
 
 for (const width of [1440, 390]) {
   test(`seed behavior survives reload and advances after a demo run at ${width}px`, async ({

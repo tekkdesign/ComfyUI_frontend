@@ -7,7 +7,7 @@ import type {
 import { zExchangeTokenRequest } from '@comfyorg/ingest-types/zod'
 
 import { AccountMenu } from './fixtures/accountMenu'
-import { MODEL_PATH, test } from './fixtures/modelsAccount'
+import { MODEL_PATH, test } from './fixtures/studioAccount'
 
 async function completeNativeResult(
   page: Page,

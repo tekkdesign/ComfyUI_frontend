@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { test } from './fixtures/modelsAccount'
+import { test } from './fixtures/studioAccount'
 
 for (const width of [1440, 390]) {
   test(`video starters fill a draft and explain durations without submitting at ${width}px`, async ({

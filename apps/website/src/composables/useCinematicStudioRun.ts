@@ -19,6 +19,7 @@ import { cinematicImageForm } from '../lib/workshop/cinematic-studio/models'
 import type { CreationSettings } from '../lib/workshop/cinematic-studio/creations'
 import type { WorkshopModelDetail } from '../config/models-catalogue'
 import { fetchModelsPage } from '../config/models-page-data'
+import type { PreparedRouterRender } from '../config/router-render'
 import { router_render } from '../config/router-render'
 import { collectWorkshopRouter } from '../config/workshop-router-queue'
 import {
@@ -33,7 +34,10 @@ import {
   useWorkshopCredits
 } from '../config/workshop-credits'
 import { releaseRouterOutputs } from '../config/workshop-response'
-import { WorkshopRouterError } from '../config/workshop-router-errors'
+import {
+  WorkshopRouterError,
+  workshopRunMayStillSettle
+} from '../config/workshop-router-errors'
 import type { WorkshopSession } from '../config/workshop-session-state'
 import { useWorkshopSession } from '../config/workshop-session-state'
 import { workshopIdempotencyKey } from '../config/workshop-snippets'
@@ -67,6 +71,62 @@ export interface ShotRequest {
     readonly sourceFiles?: readonly File[]
     readonly resolution?: string
   }
+}
+
+interface UnsettledTake {
+  readonly key: string
+  readonly prepared?: PreparedRouterRender
+}
+
+const fileIds = new WeakMap<File, string>()
+function fileId(file: File): string {
+  const known = fileIds.get(file)
+  if (known) return known
+  const id = crypto.randomUUID()
+  fileIds.set(file, id)
+  return id
+}
+
+function takeFingerprint(
+  startedFor: WorkshopSession,
+  slug: string,
+  request: ShotRequest,
+  index: number
+): string {
+  // Everything that shapes the request body, with files compared by identity.
+  return JSON.stringify(
+    [
+      startedFor.uid,
+      startedFor.workspace.id,
+      slug,
+      request.prompt,
+      request.aspect,
+      request.resolutionPixels,
+      request.seed,
+      request.references,
+      request.video,
+      request.editing,
+      index
+    ],
+    (_key, value: unknown) => (value instanceof File ? fileId(value) : value)
+  )
+}
+
+function takeFailure(id: string, error: unknown): ReelEvent {
+  return error instanceof WorkshopRouterError
+    ? {
+        type: 'takeFailed',
+        id,
+        reason: error.reason,
+        requestId: error.requestId ?? undefined
+      }
+    : { type: 'takeFailed', id, reason: 'client' }
+}
+
+function mayStillSettle(error: unknown): boolean {
+  return (
+    error instanceof WorkshopRouterError && workshopRunMayStillSettle(error)
+  )
 }
 
 /**
@@ -168,6 +228,8 @@ export function useCinematicStudioRun(modelCount: number) {
   const attemptIsCurrent = (attempt: Attempt) =>
     !attempt.controller.signal.aborted && active === attempt
 
+  const unsettledTakes = new Map<string, UnsettledTake>()
+
   async function tokenFor(startedFor: WorkshopSession, signal: AbortSignal) {
     const credential = await ensureFresh(undefined, { signal })
     signal.throwIfAborted()
@@ -215,18 +277,6 @@ export function useCinematicStudioRun(modelCount: number) {
       error.requestSettlement === 'terminal'
     )
       record(attempt.namespace, { ...entry, status: 'terminal' })
-  }
-  function failedTake(id: string, error: unknown) {
-    dispatch(
-      error instanceof WorkshopRouterError
-        ? {
-            type: 'takeFailed',
-            id,
-            reason: error.reason,
-            requestId: error.requestId ?? undefined
-          }
-        : { type: 'takeFailed', id, reason: 'client' }
-    )
   }
   function saveTiming(
     attempt: Attempt,
@@ -279,15 +329,22 @@ export function useCinematicStudioRun(modelCount: number) {
   }
   async function renderTake(
     id: string,
+    index: number,
     model: WorkshopModelDetail,
     request: ShotRequest,
     startedFor: WorkshopSession,
-    attempt: Attempt
+    attempt: Attempt,
+    retryKey?: string
   ) {
     const signal = attempt.controller.signal
     const entry = journalEntry(id, model, request)
     attempt.entry = entry
     const timing = startGenerationTiming()
+    // A take that may still settle keeps its idempotency key and prepared
+    // request, so trying the same inputs again cannot charge twice.
+    const fingerprint = takeFingerprint(startedFor, model.slug, request, index)
+    const unsettled = unsettledTakes.get(fingerprint)
+    const key = unsettled?.key ?? retryKey ?? id
     try {
       if ((model.modality === 'video') !== Boolean(request.video))
         throw new WorkshopRouterError('validation')
@@ -299,7 +356,9 @@ export function useCinematicStudioRun(modelCount: number) {
           form: requestForm(model, request),
           signal,
           cancelOnAbort: () => attempt.cancelRequested,
-          onPrepared: () => {
+          prepared: unsettled?.prepared,
+          onPrepared: (ready) => {
+            unsettledTakes.set(fingerprint, { key, prepared: ready })
             record(attempt.namespace, entry, true)
             attempt.journaled = true
           },
@@ -311,7 +370,7 @@ export function useCinematicStudioRun(modelCount: number) {
             }
             record(attempt.namespace, attempt.entry)
           },
-          idempotencyKey: id,
+          idempotencyKey: key,
           token: () => tokenFor(startedFor, signal),
           uploadFile: async (file, uploadSignal) =>
             uploadUrl(
@@ -322,6 +381,7 @@ export function useCinematicStudioRun(modelCount: number) {
             )
         }
       )
+      unsettledTakes.delete(fingerprint)
       const output = result.outputs.at(0)
       releaseRouterOutputs(result.outputs.slice(1))
       if (
@@ -339,16 +399,63 @@ export function useCinematicStudioRun(modelCount: number) {
       return true
     } catch (error) {
       if (signal.aborted) return false
+      if (!mayStillSettle(error)) unsettledTakes.delete(fingerprint)
       terminalFailure(error, attempt, attempt.entry ?? entry)
-      failedTake(id, error)
+      dispatch(takeFailure(id, error))
       return false
     } finally {
       timing.dispose()
     }
   }
 
+  interface TakePlan {
+    readonly id: string
+    readonly index: number
+    readonly request: ShotRequest
+  }
+  const plans = new Map<string, TakePlan>()
+
   async function generate(request: ShotRequest) {
     return generateBatch([request])
+  }
+  /** Tries one failed or cancelled take again with the request it was planned with. */
+  async function retry(id: string) {
+    const startedFor = session.value
+    const plan = plans.get(id)
+    const take = reel.value.takes.find((candidate) => candidate.id === id)
+    if (
+      rendering.value ||
+      gate.value !== 'ready' ||
+      !startedFor ||
+      !plan ||
+      (take?.status !== 'failed' && take?.status !== 'cancelled')
+    )
+      return
+    dispatch({ type: 'takeRetried', id, startedAt: Date.now() })
+    const attempt: Attempt = {
+      controller: new AbortController(),
+      namespace: JSON.stringify([startedFor.uid, startedFor.workspace.id]),
+      cancelRequested: false
+    }
+    active = attempt
+    try {
+      const model = await loadModel(plan.request.modelSlug)
+      await renderTake(
+        id,
+        plan.index,
+        model,
+        plan.request,
+        startedFor,
+        attempt,
+        workshopIdempotencyKey()
+      )
+    } catch {
+      if (!attempt.controller.signal.aborted)
+        dispatch({ type: 'takeFailed', id, reason: 'unavailable' })
+    } finally {
+      if (active === attempt) active = undefined
+      void refreshWorkshopCredits({ force: true })
+    }
   }
   function createJobs(requests: readonly ShotRequest[]) {
     return requests.flatMap((request) => {
@@ -365,7 +472,11 @@ export function useCinematicStudioRun(modelCount: number) {
         preview: request.preview,
         settings: request.settings
       })
-      return ids.map((id) => ({ id, request }))
+      return ids.map((id, index) => {
+        const plan = { id, index, request }
+        plans.set(id, plan)
+        return plan
+      })
     })
   }
   function canStartBatch(requests: readonly ShotRequest[]) {
@@ -387,12 +498,13 @@ export function useCinematicStudioRun(modelCount: number) {
     startedFor: WorkshopSession,
     attempt: Attempt
   ) {
-    for (const [index, { id, request }] of jobs.entries()) {
+    for (const [position, { id, index, request }] of jobs.entries()) {
       if (attempt.controller.signal.aborted) break
       attempt.journaled = false
       const completed = await renderTake(
         id,
-        loaded[index],
+        index,
+        loaded[position],
         request,
         startedFor,
         attempt
@@ -597,6 +709,7 @@ export function useCinematicStudioRun(modelCount: number) {
     dismissRecovery,
     generate,
     generateBatch,
+    retry,
     cancel,
     select: (id: string) => dispatch({ type: 'selected', id })
   }

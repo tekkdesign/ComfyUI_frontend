@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { test } from './fixtures/modelsAccount'
+import { test } from './fixtures/studioAccount'
 
 const equipment = [
   {

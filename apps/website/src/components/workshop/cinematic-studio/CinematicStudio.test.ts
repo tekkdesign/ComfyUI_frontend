@@ -5,8 +5,14 @@ import { computed, ref } from 'vue'
 
 import type { AccountCredential } from '@comfyorg/account-core/session'
 
-import { router_render } from '../../../config/router-render'
-import type { RouterRenderResult } from '../../../config/router-render'
+import {
+  resolveModelRouterRender,
+  router_render
+} from '../../../config/router-render'
+import type {
+  PreparedRouterRender,
+  RouterRenderResult
+} from '../../../config/router-render'
 import { useWorkshopCredits } from '../../../config/workshop-credits'
 import { getRouterWorkshopModelDetail } from '../../../config/workshop-router-content'
 import { WorkshopRouterError } from '../../../config/workshop-router-errors'
@@ -14,7 +20,8 @@ import { useWorkshopSession } from '../../../config/workshop-session-state'
 import { prepareModelPage } from '../../../routes/models/model-page'
 import {
   useWorkshopEnabled,
-  useWorkshopEnabledSettled
+  useWorkshopEnabledSettled,
+  useWorkshopWorkflowsEnabled
 } from '../../../scripts/posthog'
 import { t } from '../../../i18n/translations'
 import { tc } from '../../../lib/workshop/cinematic-studio/copy'
@@ -34,9 +41,7 @@ vi.mock(
 vi.mock(import('../../../config/workshop-session-state'))
 vi.mock(import('../../../config/workshop-credits'))
 vi.mock(import('../../../scripts/posthog'))
-vi.mock(import('../../../config/router-render'), () => ({
-  router_render: vi.fn()
-}))
+vi.mock(import('../../../config/router-render'), { spy: true })
 
 const models = runnableCinematicModels(getRouterWorkshopModelDetail)
 const editingModels = runnableCinematicEditingModels(
@@ -190,6 +195,7 @@ describe('CinematicStudio', () => {
     vi.stubEnv('PUBLIC_WORKSHOP_ROUTER_RUN', '1')
     vi.mocked(useWorkshopEnabled).mockReturnValue(computed(() => true))
     vi.mocked(useWorkshopEnabledSettled).mockReturnValue(computed(() => true))
+    vi.mocked(useWorkshopWorkflowsEnabled).mockReturnValue(computed(() => true))
     const session = useWorkshopSession()
     session.session = computed(() => signedIn.value)
     vi.mocked(session.ensureFresh).mockResolvedValue({
@@ -201,7 +207,9 @@ describe('CinematicStudio', () => {
       credits: 100
     }))
     signedIn.value = credential
-    vi.mocked(router_render).mockReset()
+    vi.mocked(router_render)
+      .mockReset()
+      .mockRejectedValue(new WorkshopRouterError('client'))
     vi.stubGlobal('fetch', fetchData)
     fetchData.mockImplementation(servePageData)
     window.history.replaceState(null, '', '/cinematic-studio')
@@ -882,6 +890,172 @@ describe('CinematicStudio', () => {
     expect(router_render).not.toHaveBeenCalled()
   })
 
+  it('does not charge for references a model would drop', async () => {
+    const dropsReferences = models.find(
+      (model) => model.mode !== 'video' && !model.referenceModelSlug
+    )
+    if (!dropsReferences) throw new Error('Every model keeps references')
+    window.history.replaceState(
+      null,
+      '',
+      `/cinematic-studio?model=${dropsReferences.slug}`
+    )
+    const user = renderStudio()
+    const face = new File(['face'], 'mara.png', { type: 'image/png' })
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: tc('cinematic.composer.references')
+      })
+    )
+    await user.upload(screen.getByTestId('cinematic-reference-cast'), face)
+    await user.type(screen.getByLabelText('Scene'), 'A diner at dawn')
+
+    expect(generateButton()).toBeDisabled()
+    expect(
+      screen.getByText(
+        tc('cinematic.references.unsupported').replace(
+          '{model}',
+          dropsReferences.name
+        )
+      )
+    ).toBeInTheDocument()
+    expect(router_render).not.toHaveBeenCalled()
+  })
+
+  it.for([
+    {
+      layout: 'the stage',
+      ux: '',
+      inFormat: true,
+      settlement: 'pending' as const
+    },
+    {
+      layout: 'the stage',
+      ux: '',
+      inFormat: true,
+      settlement: 'terminal' as const
+    },
+    {
+      layout: 'the side panel',
+      ux: '?ux=d',
+      inFormat: false,
+      settlement: 'pending' as const
+    }
+  ])(
+    'tries only the failed take again on $layout after a $settlement failure',
+    async ({ ux, inFormat, settlement }) => {
+      window.history.replaceState(null, '', `/cinematic-studio${ux}`)
+      const first: {
+        key: unknown
+        prepared: PreparedRouterRender
+      }[] = []
+      vi.mocked(router_render).mockImplementation(
+        async (slug, parameters, options) => {
+          if (first.length >= 2) return rendered(slug)
+          const prepared = {
+            ...resolveModelRouterRender(options.model, parameters),
+            body: { take: first.length }
+          }
+          await options.onPrepared?.(prepared)
+          first.push({ key: options.idempotencyKey, prepared })
+          if (first.length === 1) return rendered(slug)
+          throw new WorkshopRouterError(
+            'network',
+            'request-7',
+            {},
+            undefined,
+            'response',
+            { requestSettlement: settlement }
+          )
+        }
+      )
+      render(CinematicStudioPage, { props: { models } })
+      const user = userEvent.setup()
+
+      await user.type(await screen.findByLabelText('Scene'), 'A diner at dawn')
+      if (inFormat)
+        await user.click(screen.getByRole('button', { name: /^Format/ }))
+      await user.click(screen.getByRole('button', { name: 'More takes' }))
+      await user.click(generateButton())
+      await confirmShot(user)
+      await user.click(await screen.findByRole('radio', { name: 'B' }))
+      await user.click(
+        within(await screen.findByRole('status')).getByRole('button', {
+          name: t('workshop.error.retry')
+        })
+      )
+
+      await vi.waitFor(() =>
+        expect(vi.mocked(router_render)).toHaveBeenCalledTimes(3)
+      )
+      const [, , retry] = vi.mocked(router_render).mock.calls[2]
+      if (settlement === 'pending') {
+        expect(retry.idempotencyKey).toBe(first[1].key)
+        expect(retry.prepared).toBe(first[1].prepared)
+      } else {
+        expect(retry.prepared).toBeUndefined()
+        expect([first[0].key, first[1].key]).not.toContain(retry.idempotencyKey)
+      }
+    }
+  )
+
+  it('does not generate again once the scene is cleared', async () => {
+    vi.mocked(router_render).mockImplementation(async (slug) => rendered(slug))
+    const user = renderStudio()
+
+    await user.type(screen.getByLabelText('Scene'), 'A diner at dawn')
+    await user.click(generateButton())
+    await confirmShot(user)
+    await screen.findByAltText(/A diner at dawn/)
+    await user.clear(screen.getByLabelText('Scene'))
+    await user.click(
+      screen.getByRole('button', { name: tc('cinematic.stage.again') })
+    )
+
+    expect(router_render).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the scene unreferenced when a take can no longer be read', async () => {
+    fetchData.mockImplementation(async (input) =>
+      String(input).startsWith('blob:')
+        ? Promise.reject(new TypeError('Revoked'))
+        : servePageData(input)
+    )
+    vi.mocked(router_render).mockImplementation(async (slug) => rendered(slug))
+    const user = renderStudio()
+    await user.type(screen.getByLabelText('Scene'), 'A diner at dawn')
+    await user.click(generateButton())
+    await confirmShot(user)
+    await screen.findByAltText(/A diner at dawn/)
+
+    await user.click(
+      screen.getByRole('button', { name: tc('cinematic.stage.useAsReference') })
+    )
+    await user.click(
+      screen.getByRole('button', { name: tc('cinematic.stage.again') })
+    )
+    await confirmShot(user)
+
+    await vi.waitFor(() => expect(router_render).toHaveBeenCalledTimes(2))
+    const [slug, , options] = vi.mocked(router_render).mock.calls[1]
+    expect(slug).toBe(first.slug)
+    expect(options.form?.values.reference_images).toBeUndefined()
+    expect(options.form?.values.images).toBeUndefined()
+  })
+
+  it('withholds the studio from visitors outside the staff rollout', async () => {
+    vi.mocked(useWorkshopWorkflowsEnabled).mockReturnValue(
+      computed(() => false)
+    )
+    render(CinematicStudioPage, { props: { models } })
+
+    expect(
+      await screen.findByText(tc('cinematic.unavailable.title'))
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId('cinematic')).toBeNull()
+  })
+
   describe('layout switch', () => {
     const panel = () =>
       screen.queryByRole('complementary', { name: 'Shot settings' })
@@ -900,6 +1074,60 @@ describe('CinematicStudio', () => {
 
       expect(panel()).toBeInTheDocument()
       expect(window.location.search).toBe('?ux=d')
+    })
+
+    it('asks before a layout switch would cancel a take still rendering', async () => {
+      const signals: AbortSignal[] = []
+      vi.mocked(router_render).mockImplementation(
+        (_slug, _parameters, options) =>
+          new Promise(() => {
+            if (options.signal) signals.push(options.signal)
+          })
+      )
+      render(CinematicStudioPage, { props: { models } })
+      const user = userEvent.setup()
+
+      await user.type(await screen.findByLabelText('Scene'), 'A diner at dawn')
+      await user.click(generateButton())
+      await confirmShot(user)
+      await user.click(
+        await screen.findByRole('button', { name: /^Layout to review/ })
+      )
+      await user.click(
+        await screen.findByRole('menuitemradio', { name: /D · Side panel/ })
+      )
+      const dialog = await screen.findByRole('dialog', {
+        name: t('workshop.run.leaveTitle')
+      })
+
+      expect(panel()).toBeNull()
+      expect(signals[0].aborted).toBe(false)
+      await user.click(
+        within(dialog).getByRole('button', {
+          name: t('workshop.run.leaveAnyway')
+        })
+      )
+      expect(panel()).toBeInTheDocument()
+      expect(signals[0].aborted).toBe(true)
+    })
+
+    it('swaps to the Re-shoot app, which has a single layout', async () => {
+      window.history.replaceState(null, '', '/cinematic-studio?ux=d')
+      render(CinematicStudioPage, { props: { models } })
+      const user = userEvent.setup()
+
+      await user.click(
+        await screen.findByRole('button', { name: /^Layout to review/ })
+      )
+      await user.click(
+        await screen.findByRole('menuitemradio', { name: 'Re-shoot a video' })
+      )
+
+      expect(
+        screen.getByRole('complementary', { name: 'Your clip' })
+      ).toBeInTheDocument()
+      expect(panel()).toBeNull()
+      expect(window.location.search).toBe('?ux=d&app=reshoot')
     })
 
     it('lists Cinematic Studio first and Re-shoot a video next in the Hub apps tab', async () => {

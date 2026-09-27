@@ -69,6 +69,7 @@ export function useCinematicDemoRun() {
   const rendering = computed(() => isRendering(reel.value))
   const gate = computed<StudioGate>(() => (mounted.value ? 'ready' : 'pending'))
   const timers = new Set<ReturnType<typeof setTimeout>>()
+  const videoTakes = new Set<string>()
   let frame = 0
 
   function settle(
@@ -118,6 +119,7 @@ export function useCinematicDemoRun() {
       })
       const renderMs = scenario === 'slow' ? SLOW_RENDER_MS : DEMO_RENDER_MS
       ids.forEach((id) => {
+        if (shot.video) videoTakes.add(id)
         const index = order++
         const timer = setTimeout(
           () => {
@@ -129,6 +131,16 @@ export function useCinematicDemoRun() {
         timers.add(timer)
       })
     })
+  }
+
+  function retry(id: string) {
+    if (rendering.value) return
+    dispatch({ type: 'takeRetried', id, startedAt: Date.now() })
+    const timer = setTimeout(() => {
+      timers.delete(timer)
+      settle(id, 0, null, videoTakes.has(id))
+    }, DEMO_RENDER_MS)
+    timers.add(timer)
   }
 
   function cancel() {
@@ -150,6 +162,7 @@ export function useCinematicDemoRun() {
     dismissRecovery: (_id: string) => {},
     generate,
     generateBatch,
+    retry,
     cancel,
     select: (id: string) => dispatch({ type: 'selected', id })
   }

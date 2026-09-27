@@ -38,6 +38,7 @@ export interface CinematicModel {
   readonly mode?: 'image' | 'video'
   readonly video?: CinematicVideoDescriptor
   readonly seed?: CinematicSeedDescriptor
+  /** The operation that keeps reference images, when the model has one. */
   readonly referenceModelSlug?: string
   readonly referenceMax?: number
   readonly imageAspects?: readonly string[]

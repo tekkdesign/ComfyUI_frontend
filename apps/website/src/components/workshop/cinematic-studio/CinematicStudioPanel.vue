@@ -4,6 +4,7 @@ import CinematicSeedControls from './CinematicSeedControls.vue'
 import type { WorkshopModelDetail } from '../../../config/models-catalogue'
 import { ref, useTemplateRef } from 'vue'
 
+import { useCinematicLeaveGuard } from '../../../composables/useCinematicLeaveGuard'
 import { useCinematicPopover } from '../../../composables/useCinematicPopover'
 import CinematicCreativeEditor from './CinematicCreativeEditor.vue'
 import CinematicSceneBuilder from './CinematicSceneBuilder.vue'
@@ -19,9 +20,12 @@ import CinematicRecovery from './CinematicRecovery.vue'
 import { creativePrompt } from '../../../lib/workshop/cinematic-studio/creative'
 import { cinematicPrompt } from '../../../lib/workshop/cinematic-studio/prompt'
 import { useCinematicShot } from '../../../composables/useCinematicShot'
+import { reportStudioBusy } from '../../../composables/useStudioSwitchGuard'
 import type { CinematicModel } from '../../../lib/workshop/cinematic-studio/models'
 import type { Locale } from '../../../i18n/translations'
 import { tc } from '../../../lib/workshop/cinematic-studio/copy'
+import RunLeaveDialog from '../RunLeaveDialog.vue'
+import AppsBackLink from './AppsBackLink.vue'
 import CinematicPanel from './CinematicPanel.vue'
 import CinematicPicker from './CinematicPicker.vue'
 import CinematicStageCard from './CinematicStageCard.vue'
@@ -106,6 +110,11 @@ const {
   choose,
   generate: generateShot
 } = shot
+reportStudioBusy(() => studio.rendering.value)
+const { leavingTo, leave, stay } = useCinematicLeaveGuard(
+  () => studio.rendering.value,
+  () => studio.cancel()
+)
 const {
   open: picker,
   toggle: togglePicker,
@@ -288,6 +297,7 @@ function generate() {
       @close="review = undefined"
       @confirm="confirm"
     />
+    <AppsBackLink :locale class="mb-3" />
     <div class="mb-6 flex items-center gap-3">
       <h1 class="text-2xl font-semibold text-primary-warm-white lg:text-3xl">
         {{ tc('cinematic.title', locale) }}
@@ -373,6 +383,7 @@ function generate() {
           @reference="useAsReference"
           @switch-model="generateOn"
           @edit-scene="focusScene"
+          @retry="studio.retry"
         />
         <div
           v-if="picker"
@@ -392,5 +403,11 @@ function generate() {
         />
       </div>
     </div>
+    <RunLeaveDialog
+      :open="leavingTo !== undefined"
+      :locale
+      @update:open="(value: boolean) => !value && stay()"
+      @leave="leave"
+    />
   </div>
 </template>

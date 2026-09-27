@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import {
+  prepareModelRouterRender,
+  resolveModelRouterRender
+} from '../../../config/router-render'
 import { workshopContract } from '../../../config/workshop-contract-catalog'
-import { prepareModelRouterRender } from '../../../config/router-render'
 import { getAuthoredRouterWorkshopModelDetail } from '../../../config/workshop-router-content'
 import {
   cinematicStudioHref,
@@ -275,5 +278,50 @@ describe('cinematicStudioHref', () => {
 
   it('does not link a model the studio cannot run', () => {
     expect(cinematicStudioHref('kling-ai', '/cinematic-studio')).toBeUndefined()
+  })
+})
+
+function holds(value: unknown, file: File): boolean {
+  if (value === file) return true
+  if (value instanceof Blob || value === null || typeof value !== 'object')
+    return false
+  return Object.values(value).some((item) => holds(item, file))
+}
+
+describe('reference operations', () => {
+  const models = runnableCinematicModels(getAuthoredRouterWorkshopModelDetail)
+  const cast = new File(['cast'], 'cast.png', { type: 'image/png' })
+  const palette = new File(['palette'], 'palette.png', { type: 'image/png' })
+
+  it.for(models.filter((model) => model.referenceModelSlug))(
+    'sends the references of $name through the real parameter mapper',
+    ({ referenceModelSlug }) => {
+      const detail = referenceModelSlug
+        ? getAuthoredRouterWorkshopModelDetail(referenceModelSlug)
+        : undefined
+      if (!detail) throw new Error(`Missing ${referenceModelSlug}`)
+
+      const { values } = resolveModelRouterRender(detail, {
+        prompt: 'A lighthouse at dusk',
+        reference_images: [cast, palette]
+      })
+
+      expect(holds(values, cast)).toBe(true)
+    }
+  )
+
+  it('offers no reference operation for a model that would drop them', () => {
+    expect(
+      models
+        .filter((model) => model.mode !== 'video' && !model.referenceModelSlug)
+        .map((model) => model.slug)
+    ).toEqual([
+      'krea--krea-2-large--generate-images',
+      'openai--gpt-image-2--generate-images',
+      'openai--gpt-image-2.5-flare--generate-images',
+      'openai--gpt-image-2.5-sunburst--generate-images',
+      'xai--grok-imagine-image-2.0--generate-images',
+      'recraft--v4.1-text-to-image--generate-images'
+    ])
   })
 })

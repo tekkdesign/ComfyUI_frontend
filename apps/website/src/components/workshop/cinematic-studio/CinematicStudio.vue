@@ -24,12 +24,14 @@ import CinematicRecovery from './CinematicRecovery.vue'
 import { creativePrompt } from '../../../lib/workshop/cinematic-studio/creative'
 import { cinematicPrompt } from '../../../lib/workshop/cinematic-studio/prompt'
 import { useCinematicShot } from '../../../composables/useCinematicShot'
+import { reportStudioBusy } from '../../../composables/useStudioSwitchGuard'
 import type { DirectionPart } from '../../../lib/workshop/cinematic-studio/catalog'
 import type { CinematicModel } from '../../../lib/workshop/cinematic-studio/models'
 import type { StarterShot } from '../../../lib/workshop/cinematic-studio/starters'
 import type { Locale } from '../../../i18n/translations'
 import { tc } from '../../../lib/workshop/cinematic-studio/copy'
 import RunLeaveDialog from '../RunLeaveDialog.vue'
+import AppsBackLink from './AppsBackLink.vue'
 import CinematicComposer from './CinematicComposer.vue'
 import CinematicReviewDialog from './CinematicReviewDialog.vue'
 import CinematicModeSwitch from './CinematicModeSwitch.vue'
@@ -101,6 +103,7 @@ const {
   start: startShot,
   generate: generateShot
 } = shot
+reportStudioBusy(() => studio.rendering.value)
 const {
   open: popover,
   toggle: togglePopover,
@@ -186,6 +189,7 @@ function chooseStartingImage() {
     class="mb-12 flex min-h-[calc(100svh-5rem)] flex-col lg:mb-20 lg:min-h-[calc(100svh-7rem)]"
     data-testid="cinematic"
   >
+    <AppsBackLink :locale class="mx-3 mt-4 sm:mx-6" />
     <CinematicMotionCompare
       v-model:open="motionOpen"
       :items="library.items.value"

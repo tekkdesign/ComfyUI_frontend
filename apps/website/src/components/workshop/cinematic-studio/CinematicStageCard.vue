@@ -32,6 +32,7 @@ const {
 const emit = defineEmits<{
   select: [id: string]
   again: []
+  retry: [id: string]
   reference: [url: string, name: string]
   animate: [url: string, name: string]
   edit: [url: string, name: string]
@@ -78,7 +79,7 @@ const otherModel = computed(() => {
           :current
           :locale
           :other-model="otherModel"
-          @again="emit('again')"
+          @retry="emit('retry', current.id)"
           @switch-model="emit('switchModel', $event)"
           @edit-scene="emit('editScene')"
         />
